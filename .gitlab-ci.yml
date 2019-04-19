@@ -1,0 +1,27 @@
+services:
+  - docker:dind
+build:
+  image: docker:latest
+  stage: build
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN registry.gitlab.com
+  script:
+    - docker build --pull -t registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA -t registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:latest .
+    - docker push registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
+    - docker push registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:latest
+deploy_staging:
+  stage: deploy
+  image: ubuntu:18.04
+  environment:
+    name: staging
+    url: http://example.com
+  before_script:
+    - 'which ssh-agent || ( apt-get update && apt-get install -qq openssh-client )'
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$SSH_KEY")
+    - mkdir -p ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - ssh root@$SSH_IP "cd /var/projects/composition_stage/ && docker-compose pull app && docker-compose up -d"
+  only:
+    - master
