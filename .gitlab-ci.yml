@@ -1,27 +1,45 @@
-services:
-  - docker:dind
-build:
-  image: docker:latest
-  stage: build
-  before_script:
-    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN registry.gitlab.com
+stages:
+  - test
+  - deploy
+  
+image: ubuntu:18.04
+
+before_script:
+  # Install ssh-agent if not already installed, it is required by Docker.
+  # (change apt-get to yum if you use a CentOS-based image)
+  - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+
+  # Run ssh-agent (inside the build environment)
+  - eval $(ssh-agent -s)
+  - pwd
+  # Add the SSH key stored in SSH_PRIVATE_KEY variable to the agent store
+  - ssh-add <(echo "$ACQUIA_SSH_KEY")
+  - fin ssh-add id_rsa
+
+  - mkdir -p ~/.ssh
+  - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+  - git config --global push.default simple
+  - git pull origin $CI_BUILD_REF_NAME
+  - git remote add acquia "keytec@svn-4443.devcloud.hosting.acquia.com:keytec.git"
+
+after_script:
+  - git remote rm acquia
+
+test:
+  stage: test
   script:
-    - docker build --pull -t registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA -t registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:latest .
-    - docker push registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:$CI_COMMIT_SHORT_SHA
-    - docker push registry.gitlab.com/user/repo/$CI_COMMIT_REF_NAME:latest
+    - echo "Running tests"
+    - fin ci
+
 deploy_staging:
   stage: deploy
-  image: ubuntu:18.04
-  environment:
-    name: staging
-    url: http://example.com
-  before_script:
-    - 'which ssh-agent || ( apt-get update && apt-get install -qq openssh-client )'
-    - eval $(ssh-agent -s)
-    - ssh-add <(echo "$SSH_KEY")
-    - mkdir -p ~/.ssh
-    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
   script:
-    - ssh root@$SSH_IP "cd /var/projects/composition_stage/ && docker-compose pull app && docker-compose up -d"
+    - echo "Deploy to staging server"
+    - git pull origin $CI_BUILD_REF_NAME
+    - git checkout $CI_BUILD_REF_NAME
+    - git pull
+    - git push acquia $CI_BUILD_REF_NAME:$CI_BUILD_REF_NAME
+  environment:
+    name: keytec.dev
   only:
     - master
